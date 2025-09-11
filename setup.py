@@ -39,7 +39,7 @@ def get_extensions():
 setup(
     # Meta Data
     name="cc_torch",
-    version="0.1",
+    version="0.2",
     description="Connected Components Labeling for PyTorch",
     # Package Info
     zip_safe=False,

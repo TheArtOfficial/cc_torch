@@ -53,19 +53,23 @@ __device__ void union_(int32_t* s_buf, int32_t a, int32_t b) {
 
 __global__ void
 init_labeling(int32_t* label, const uint32_t W, const uint32_t H) {
+  const uint32_t n = blockIdx.z; // batch index
   const uint32_t row = (blockIdx.y * blockDim.y + threadIdx.y) * 2;
   const uint32_t col = (blockIdx.x * blockDim.x + threadIdx.x) * 2;
   const uint32_t idx = row * W + col;
+  const uint32_t offset = n * H * W;
 
   if (row < H && col < W)
-    label[idx] = idx;
+    label[offset + idx] = idx; // each image uses local indexing, later +1
 }
 
 __global__ void
 merge(uint8_t* img, int32_t* label, const uint32_t W, const uint32_t H) {
+  const uint32_t n = blockIdx.z; // batch index
   const uint32_t row = (blockIdx.y * blockDim.y + threadIdx.y) * 2;
   const uint32_t col = (blockIdx.x * blockDim.x + threadIdx.x) * 2;
   const uint32_t idx = row * W + col;
+  const uint32_t offset = n * H * W;
 
   if (row >= H || col >= W)
     return;
@@ -90,11 +94,11 @@ merge(uint8_t* img, int32_t* label, const uint32_t W, const uint32_t H) {
   // if (buffer[1])              P |= (0x777 << 1);
   // if (buffer[2])              P |= (0x777 << 4);
 
-  if (img[idx])
+  if (img[offset + idx])
     P |= 0x777;
-  if (row + 1 < H && img[idx + W])
+  if (row + 1 < H && img[offset + idx + W])
     P |= 0x777 << 4;
-  if (col + 1 < W && img[idx + 1])
+  if (col + 1 < W && img[offset + idx + 1])
     P |= 0x777 << 1;
 
   if (col == 0)
@@ -112,28 +116,32 @@ merge(uint8_t* img, int32_t* label, const uint32_t W, const uint32_t H) {
   if (P > 0) {
     // If need check about top-left pixel(if flag the first bit) and hit the
     // top-left pixel
-    if (hasBit(P, 0) && img[idx - W - 1]) {
-      union_(label, idx, idx - 2 * W - 2); // top left block
+    if (hasBit(P, 0) && img[offset + idx - W - 1]) {
+      union_(label + offset, idx, idx - 2 * W - 2); // top left block
     }
 
-    if ((hasBit(P, 1) && img[idx - W]) || (hasBit(P, 2) && img[idx - W + 1]))
-      union_(label, idx, idx - 2 * W); // top bottom block
+    if ((hasBit(P, 1) && img[offset + idx - W]) ||
+        (hasBit(P, 2) && img[offset + idx - W + 1]))
+      union_(label + offset, idx, idx - 2 * W); // top bottom block
 
-    if (hasBit(P, 3) && img[idx + 2 - W])
-      union_(label, idx, idx - 2 * W + 2); // top right block
+    if (hasBit(P, 3) && img[offset + idx + 2 - W])
+      union_(label + offset, idx, idx - 2 * W + 2); // top right block
 
-    if ((hasBit(P, 4) && img[idx - 1]) || (hasBit(P, 8) && img[idx + W - 1]))
-      union_(label, idx, idx - 2); // just left block
+    if ((hasBit(P, 4) && img[offset + idx - 1]) ||
+        (hasBit(P, 8) && img[offset + idx + W - 1]))
+      union_(label + offset, idx, idx - 2); // just left block
   }
 }
 
 __global__ void compression(int32_t* label, const int32_t W, const int32_t H) {
+  const uint32_t n = blockIdx.z; // batch index
   const uint32_t row = (blockIdx.y * blockDim.y + threadIdx.y) * 2;
   const uint32_t col = (blockIdx.x * blockDim.x + threadIdx.x) * 2;
   const uint32_t idx = row * W + col;
+  const uint32_t offset = n * H * W;
 
   if (row < H && col < W)
-    find_n_compress(label, idx);
+    find_n_compress(label + offset, idx);
 }
 
 __global__ void final_labeling(
@@ -141,39 +149,41 @@ __global__ void final_labeling(
     int32_t* label,
     const int32_t W,
     const int32_t H) {
+  const uint32_t n = blockIdx.z; // batch index
   const uint32_t row = (blockIdx.y * blockDim.y + threadIdx.y) * 2;
   const uint32_t col = (blockIdx.x * blockDim.x + threadIdx.x) * 2;
   const uint32_t idx = row * W + col;
+  const uint32_t offset = n * H * W;
 
   if (row >= H || col >= W)
     return;
 
-  int32_t y = label[idx] + 1;
+  int32_t y = label[offset + idx] + 1;
 
-  if (img[idx])
-    label[idx] = y;
+  if (img[offset + idx])
+    label[offset + idx] = y;
   else
-    label[idx] = 0;
+    label[offset + idx] = 0;
 
   if (col + 1 < W) {
-    if (img[idx + 1])
-      label[idx + 1] = y;
+    if (img[offset + idx + 1])
+      label[offset + idx + 1] = y;
     else
-      label[idx + 1] = 0;
+      label[offset + idx + 1] = 0;
 
     if (row + 1 < H) {
-      if (img[idx + W + 1])
-        label[idx + W + 1] = y;
+      if (img[offset + idx + W + 1])
+        label[offset + idx + W + 1] = y;
       else
-        label[idx + W + 1] = 0;
+        label[offset + idx + W + 1] = 0;
     }
   }
 
   if (row + 1 < H) {
-    if (img[idx + W])
-      label[idx + W] = y;
+    if (img[offset + idx + W])
+      label[offset + idx + W] = y;
     else
-      label[idx + W] = 0;
+      label[offset + idx + W] = 0;
   }
 }
 
@@ -182,17 +192,19 @@ __global__ void init_counting(
     int32_t* count_init,
     const int32_t W,
     const int32_t H) {
+  const uint32_t n = blockIdx.z; // batch index
   const uint32_t row = (blockIdx.y * blockDim.y + threadIdx.y);
   const uint32_t col = (blockIdx.x * blockDim.x + threadIdx.x);
   const uint32_t idx = row * W + col;
+  const uint32_t offset = n * H * W;
 
   if (row >= H || col >= W)
     return;
 
-  int32_t y = label[idx];
+  int32_t y = label[offset + idx];
   if (y > 0) {
     int32_t count_idx = y - 1;
-    atomicAdd(count_init + count_idx, 1);
+    atomicAdd(count_init + offset + count_idx, 1);
   }
 }
 
@@ -202,25 +214,27 @@ __global__ void final_counting(
     int32_t* count_final,
     const int32_t W,
     const int32_t H) {
+  const uint32_t n = blockIdx.z; // batch index
   const uint32_t row = (blockIdx.y * blockDim.y + threadIdx.y);
   const uint32_t col = (blockIdx.x * blockDim.x + threadIdx.x);
   const uint32_t idx = row * W + col;
+  const uint32_t offset = n * H * W;
 
   if (row >= H || col >= W)
     return;
 
-  int32_t y = label[idx];
+  int32_t y = label[offset + idx];
   if (y > 0) {
     int32_t count_idx = y - 1;
-    count_final[idx] = count_init[count_idx];
+    count_final[offset + idx] = count_init[offset + count_idx];
   } else {
-    count_final[idx] = 0;
+    count_final[offset + idx] = 0;
   }
 }
 
 } // namespace cc2d
 
-std::vector<torch::Tensor> connected_componnets_labeling_2d(
+std::vector<torch::Tensor> connected_components_labeling_2d(
     const torch::Tensor& inputs,
     bool get_counts) {
   AT_ASSERTM(inputs.is_cuda(), "inputs must be a CUDA tensor");
@@ -244,47 +258,43 @@ std::vector<torch::Tensor> connected_componnets_labeling_2d(
   torch::Tensor counts_init = torch::zeros({N, C, H, W}, label_options);
   torch::Tensor counts_final = torch::zeros({N, C, H, W}, label_options);
 
+  if (N == 0 || H == 0 || W == 0) {
+    // empty input masks, return an empty label and count tensor
+    // returned values are [labels, counts]
+    std::vector<torch::Tensor> outputs;
+    outputs.push_back(labels);
+    outputs.push_back(counts_final);
+    return outputs;
+  }
+
   dim3 grid = dim3(
-      ((W + 1) / 2 + BLOCK_COLS - 1) / BLOCK_COLS,
-      ((H + 1) / 2 + BLOCK_ROWS - 1) / BLOCK_ROWS);
+    ((W + 1) / 2 + BLOCK_COLS - 1) / BLOCK_COLS,
+    ((H + 1) / 2 + BLOCK_ROWS - 1) / BLOCK_ROWS,
+    N);
   dim3 block = dim3(BLOCK_COLS, BLOCK_ROWS);
   dim3 grid_count =
-      dim3((W + BLOCK_COLS) / BLOCK_COLS, (H + BLOCK_ROWS) / BLOCK_ROWS);
+    dim3((W + BLOCK_COLS) / BLOCK_COLS, (H + BLOCK_ROWS) / BLOCK_ROWS, N);
   dim3 block_count = dim3(BLOCK_COLS, BLOCK_ROWS);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  for (int n = 0; n < N; n++) {
-    uint32_t offset = n * H * W;
+  cc2d::init_labeling<<<grid, block, 0, stream>>>(
+    labels.data_ptr<int32_t>(), W, H);
+  cc2d::merge<<<grid, block, 0, stream>>>(
+    inputs.data_ptr<uint8_t>(), labels.data_ptr<int32_t>(), W, H);
+  cc2d::compression<<<grid, block, 0, stream>>>(
+    labels.data_ptr<int32_t>(), W, H);
+  cc2d::final_labeling<<<grid, block, 0, stream>>>(
+    inputs.data_ptr<uint8_t>(), labels.data_ptr<int32_t>(), W, H);
 
-    cc2d::init_labeling<<<grid, block, 0, stream>>>(
-        labels.data_ptr<int32_t>() + offset, W, H);
-    cc2d::merge<<<grid, block, 0, stream>>>(
-        inputs.data_ptr<uint8_t>() + offset,
-        labels.data_ptr<int32_t>() + offset,
-        W,
-        H);
-    cc2d::compression<<<grid, block, 0, stream>>>(
-        labels.data_ptr<int32_t>() + offset, W, H);
-    cc2d::final_labeling<<<grid, block, 0, stream>>>(
-        inputs.data_ptr<uint8_t>() + offset,
-        labels.data_ptr<int32_t>() + offset,
-        W,
-        H);
-
-    // get the counting of each pixel
-    if (get_counts) {
-      cc2d::init_counting<<<grid_count, block_count, 0, stream>>>(
-          labels.data_ptr<int32_t>() + offset,
-          counts_init.data_ptr<int32_t>() + offset,
-          W,
-          H);
-      cc2d::final_counting<<<grid_count, block_count, 0, stream>>>(
-          labels.data_ptr<int32_t>() + offset,
-          counts_init.data_ptr<int32_t>() + offset,
-          counts_final.data_ptr<int32_t>() + offset,
-          W,
-          H);
-    }
+  if (get_counts) {
+  cc2d::init_counting<<<grid_count, block_count, 0, stream>>>(
+    labels.data_ptr<int32_t>(), counts_init.data_ptr<int32_t>(), W, H);
+  cc2d::final_counting<<<grid_count, block_count, 0, stream>>>(
+    labels.data_ptr<int32_t>(),
+    counts_init.data_ptr<int32_t>(),
+    counts_final.data_ptr<int32_t>(),
+    W,
+    H);
   }
 
   // returned values are [labels, counts]
@@ -297,6 +307,6 @@ std::vector<torch::Tensor> connected_componnets_labeling_2d(
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def(
       "cc_2d",
-      &connected_componnets_labeling_2d,
-      "connected_componnets_labeling_2d");
+      &connected_components_labeling_2d,
+      "connected_components_labeling_2d");
 }
