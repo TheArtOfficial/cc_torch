@@ -268,33 +268,33 @@ std::vector<torch::Tensor> connected_components_labeling_2d(
   }
 
   dim3 grid = dim3(
-    ((W + 1) / 2 + BLOCK_COLS - 1) / BLOCK_COLS,
-    ((H + 1) / 2 + BLOCK_ROWS - 1) / BLOCK_ROWS,
-    N);
+      ((W + 1) / 2 + BLOCK_COLS - 1) / BLOCK_COLS,
+      ((H + 1) / 2 + BLOCK_ROWS - 1) / BLOCK_ROWS,
+      N);
   dim3 block = dim3(BLOCK_COLS, BLOCK_ROWS);
   dim3 grid_count =
-    dim3((W + BLOCK_COLS) / BLOCK_COLS, (H + BLOCK_ROWS) / BLOCK_ROWS, N);
+      dim3((W + BLOCK_COLS) / BLOCK_COLS, (H + BLOCK_ROWS) / BLOCK_ROWS, N);
   dim3 block_count = dim3(BLOCK_COLS, BLOCK_ROWS);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   cc2d::init_labeling<<<grid, block, 0, stream>>>(
-    labels.data_ptr<int32_t>(), W, H);
+      labels.data_ptr<int32_t>(), W, H);
   cc2d::merge<<<grid, block, 0, stream>>>(
-    inputs.data_ptr<uint8_t>(), labels.data_ptr<int32_t>(), W, H);
+      inputs.data_ptr<uint8_t>(), labels.data_ptr<int32_t>(), W, H);
   cc2d::compression<<<grid, block, 0, stream>>>(
-    labels.data_ptr<int32_t>(), W, H);
+      labels.data_ptr<int32_t>(), W, H);
   cc2d::final_labeling<<<grid, block, 0, stream>>>(
-    inputs.data_ptr<uint8_t>(), labels.data_ptr<int32_t>(), W, H);
+      inputs.data_ptr<uint8_t>(), labels.data_ptr<int32_t>(), W, H);
 
   if (get_counts) {
-  cc2d::init_counting<<<grid_count, block_count, 0, stream>>>(
-    labels.data_ptr<int32_t>(), counts_init.data_ptr<int32_t>(), W, H);
-  cc2d::final_counting<<<grid_count, block_count, 0, stream>>>(
-    labels.data_ptr<int32_t>(),
-    counts_init.data_ptr<int32_t>(),
-    counts_final.data_ptr<int32_t>(),
-    W,
-    H);
+    cc2d::init_counting<<<grid_count, block_count, 0, stream>>>(
+        labels.data_ptr<int32_t>(), counts_init.data_ptr<int32_t>(), W, H);
+    cc2d::final_counting<<<grid_count, block_count, 0, stream>>>(
+        labels.data_ptr<int32_t>(),
+        counts_init.data_ptr<int32_t>(),
+        counts_final.data_ptr<int32_t>(),
+        W,
+        H);
   }
 
   // returned values are [labels, counts]
