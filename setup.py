@@ -9,9 +9,11 @@ requirements = ["torch"]
 
 def get_extensions():
     srcs = ["cc_torch/connected_components.cu"]
+    host_define = "/DUSE_CUDA" if os.name == "nt" else "-DUSE_CUDA"
     extra_compile_args = {
-        "cxx": [],
+        "cxx": [host_define],
         "nvcc": [
+            "-DUSE_CUDA",
             "-DCUDA_HAS_FP16=1",
             "-D__CUDA_NO_HALF_OPERATORS__",
             "-D__CUDA_NO_HALF_CONVERSIONS__",
